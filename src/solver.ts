@@ -1,6 +1,6 @@
 import { Constraint, Operator } from './constraint.js'
 import { Expression } from './expression.js'
-import { createMap, createFlatValuesMap, FlatValuesMap, IMap } from './maptype.js'
+import { createMap, IMap } from './maptype.js'
 import { Strength } from './strength.js'
 import { SymbolicWeight } from './symbolicweight.js'
 import { Variable } from './variable.js'
@@ -32,14 +32,6 @@ export class Solver {
       return new Solver()
     }
 	}
-
-  constructor(sharedValues?: Int32Array) {
-    if (sharedValues !== undefined) {
-      this._varMap = createSharedVarMap(sharedValues)
-    } else {
-      this._varMap = createVarMap()
-    }
-  }
 
 	/**
 	 * Creates and add a constraint to the solver.
@@ -279,20 +271,10 @@ export class Solver {
 		this._dualOptimize()
 	}
 
-  public getVariable(id: number): Variable | undefined {
-    const i = this._varMap.index[id]
-    if (i === undefined) return undefined
-
-    return this._varMap.array[i]?.first
-  }
-
-  public valueOfVariable(variable: Variable): bigint | number | undefined {
-    if (this._varMap instanceof FlatValuesMap) {
-      return this._varMap.findValue(variable)
-    }
-
-    return variable.value()
-  }
+  //
+  // public valueOfVariable(variable: Variable): bigint | number | undefined {
+  //   return variable.value()
+  // }
 
 	/**
 	 * Return the fixed sign of the marker symbol's coefficient as it
@@ -437,24 +419,15 @@ export class Solver {
 	public updateVariables(): void {
 		let vars = this._varMap
 		let rows = this._rowMap
-    const sharedValues = vars instanceof FlatValuesMap
 
 		for (let i = 0, n = vars.size(); i < n; ++i) {
 			let { first: variable, second: symbol } = vars.itemAt(i)
 			let rowPair = rows.find(symbol)
 
-      if (sharedValues) {
-        if (rowPair !== undefined) {
-  				vars.insertValueAt(rowPair.second.constant(), variable._sharedOutputIndex, variable._notify)
-  			} else {
-          vars.insertValueAt(0, variable._sharedOutputIndex, variable._notify)
-  			}
+      if (rowPair !== undefined) {
+        variable.setValue(rowPair.second.constant())
       } else {
-        if (rowPair !== undefined) {
-  				variable.setValue(rowPair.second.constant())
-  			} else {
-          variable.setValue(0.0)
-  			}
+        variable.setValue(0.0)
       }
 		}
 	}
@@ -465,7 +438,7 @@ export class Solver {
 	 * If a symbol does not exist for the variable, one will be created.
 	 * @private
 	 */
-	private _getVarSymbol(variable: Variable): Symbol {
+  protected _getVarSymbol(variable: Variable): Symbol {
 		let factory = () => this._makeSymbol(SymbolType.External)
 		return this._varMap.setDefault(variable, factory).second
 	}
@@ -988,13 +961,13 @@ export class Solver {
 	 *
 	 * @private
 	 */
-	private _makeSymbol(type: SymbolType): Symbol {
+  public _makeSymbol(type: SymbolType): Symbol {
 		return new Symbol(type, this._idTick++)
 	}
 
 	private _cnMap = createCnMap()
-	private _rowMap = createRowMap()
-	private _varMap: IMap<Variable, Symbol> | FlatValuesMap<Variable, Symbol>
+  protected _rowMap = createRowMap()
+  protected _varMap = createVarMap()
 	private _editMap = createEditMap()
 	private _infeasibleRows: Symbol[] = []
 	private _objective: ObjectiveRow = new ObjectiveRow()
@@ -1060,10 +1033,6 @@ function createVarMap(): IMap<Variable, Symbol> {
 	return createMap<Variable, Symbol>()
 }
 
-function createSharedVarMap(values: Int32Array): FlatValuesMap<Variable, Symbol> {
-	return createFlatValuesMap(values)
-}
-
 /**
  * An internal function for creating an edit map.
  * @private
@@ -1076,7 +1045,7 @@ function createEditMap(): IMap<Variable, IEditInfo> {
  * An enum defining the available symbol types.
  * @private
  */
-enum SymbolType {
+export enum SymbolType {
 	Invalid,
 	External,
 	Slack,
@@ -1088,7 +1057,7 @@ enum SymbolType {
  * An internal class representing a symbol in the solver.
  * @private
  */
-class Symbol {
+export class Symbol {
 	/**
 	 * Construct a new Symbol
 	 *

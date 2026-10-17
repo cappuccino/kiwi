@@ -283,10 +283,9 @@ public removeConstraints(constraints: Constraint[]) : void {
 		this._dualOptimize()
 	}
 
-  //
-  // public valueOfVariable(variable: Variable): bigint | number | undefined {
-  //   return variable.value()
-  // }
+  public valueOfVariable(variable: Variable): bigint | number {
+    return variable.value()
+  }
 
 	/**
 	 * Return the fixed sign of the marker symbol's coefficient as it

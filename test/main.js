@@ -630,7 +630,7 @@ describe('import kiwi', function () {
 				})
 
 				it('addConstraints => updateConstraint', async function (done) {
-					const worker = kiwi.Solver.create({worker: true})
+					const worker = kiwi.Solver.create({worker: true, refreshRate:0})
 
 					const x = new kiwi.Variable("x")
 					const expected = [100, 50, 60]
@@ -638,7 +638,7 @@ describe('import kiwi', function () {
 
 					x.subscribe((value, prev) => {
 						result.push(value)
-
+						console.log(result)
 						if (result.length == expected.length) {
 							const equals = result.every(i => expected.includes(i))
 
@@ -653,11 +653,11 @@ describe('import kiwi', function () {
 					const constraint = new kiwi.Constraint(x, kiwi.Operator.Eq, 100, kiwi.Strength.medium)
 					worker.addConstraints([constraint])
 					worker.updateVariables()
-					await wait(20)
+					await wait(100)
 
 					worker.updateConstantTo(constraint, 50)
 					worker.updateVariables()
-					await wait(20)
+					await wait(100)
 
 					worker.updateConstantTo(constraint, 60)
 					worker.updateVariables(() => console.log("done"))

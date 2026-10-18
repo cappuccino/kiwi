@@ -17,12 +17,13 @@ export class SolverWorker extends Solver {
   private _lastUpdate: number = -Infinity
   private _notifyUpdateVariables: number = 0
 
-  constructor(output: Int32Array, input: CommandConsumer, timeBuffer: SharedArrayBuffer) {
+  constructor(output: Int32Array, input: CommandConsumer, sharedBuffer: SharedArrayBuffer) {
     super()
     this._commands = input
     this._output = output
-    this._timeSeq = new Int32Array(timeBuffer, 0, 2)
-    this._timeVal = new Float64Array(timeBuffer, 8, 1)
+    this._timeSeq = new Int32Array(sharedBuffer, 0, 2)
+    this._timeVal = new Float64Array(sharedBuffer, 8, 1)
+    this._flags = new Int32Array(sharedBuffer, 16, 1)
   }
 
   /**
@@ -99,7 +100,26 @@ export class SolverWorker extends Solver {
     return this._varMap.array[i]?.first
   }
 
-  public run(updatesMs: number) : void {
+  public run(updatesMs: number): void {
+    if (updatesMs === 0) {
+      this.run_no_limit()
+    } else {
+      this.run_every(updatesMs)
+    }
+  }
+
+  public run_no_limit() : void {
+    while(true) {
+      if (this._needsUpdateVariables) {
+        this.flushVariables(0)
+      } else {
+        const type = this._commands.next()
+        this.handleCommand(type)
+      }
+    }
+  }
+
+  public run_every(updatesMs: number) : void {
     while (true) {
       let type: number
       if (this._needsUpdateVariables) {

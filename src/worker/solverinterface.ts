@@ -17,6 +17,7 @@ export class SolverInterface {
 	private _lastCommand: number | undefined = undefined
 	private _timeSeq: Int32Array
 	private _timeVal: Float64Array
+	private _flags: Int32Array
 
 	constructor(options? : any) {
 		this._worker = new MyWorker()
@@ -27,13 +28,14 @@ export class SolverInterface {
     const inputBuffer = createCommandBuffer(COMMAND_DATA_LENGTH) // 65 536 words by default
 		this._commands = new CommandProducer(inputBuffer)
 
-		const timeBuffer = new SharedArrayBuffer(16)
-		this._timeSeq = new Int32Array(timeBuffer, 0, 2)
-		this._timeVal = new Float64Array(timeBuffer, 8, 1)
+		const sharedBuffer = new SharedArrayBuffer(20)
+		this._timeSeq = new Int32Array(sharedBuffer, 0, 2)
+		this._timeVal = new Float64Array(sharedBuffer, 8, 1)
+		this._flags = new Int32Array(sharedBuffer, 16, 1)
 
 		this._worker.postMessage({
 			type: SolverCommand.INIT,
-			data: { input: inputBuffer, output: this._sharedOuputArray, time: timeBuffer },
+			data: { input: inputBuffer, output: this._sharedOuputArray, shared: sharedBuffer },
 			options
 		})
 
@@ -136,9 +138,13 @@ export class SolverInterface {
 		this.sendCommand2(SolverCommand.SUGGEST_VALUE, id, value)
 	}
 
-	public updateVariables(): void {
+	public updateVariables(callback: (() => void) | undefined): void {
 		if (this._lastCommand !== SolverCommand.UPDATE_VARIABLES) {
-			this.sendCommand(SolverCommand.UPDATE_VARIABLES)
+			if (callback !== undefined) {
+				this.watchValueOnce(SolverCommand.UPDATE_VARIABLES, this._flags, 0, callback)
+			} else {
+				this.sendCommand(SolverCommand.UPDATE_VARIABLES)
+			}
 		}
 	}
 
@@ -161,6 +167,15 @@ export class SolverInterface {
 		this.sendCommand(SolverCommand.TIME)
 		const r = Atomics.waitAsync(this._timeSeq, 0, seq)
 		const done = () => callback(this._timeVal[0])
+		if (r.async) r.value.then(done)
+		else done() // le worker a déjà répondu : "not-equal", valeur déjà prête
+	}
+
+	public watchValueOnce(command: number, typedArray: Int32Array, index: number, callback: () => void) {
+		const value = Atomics.load(typedArray, index) // lu AVANT l'envoi de la commande
+		this.sendCommand(command)
+		const r = Atomics.waitAsync(typedArray, index, value)
+		const done = () => {callback(); typedArray[index] = 0}
 		if (r.async) r.value.then(done)
 		else done() // le worker a déjà répondu : "not-equal", valeur déjà prête
 	}

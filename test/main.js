@@ -660,7 +660,7 @@ describe('import kiwi', function () {
 					await wait(20)
 
 					worker.updateConstantTo(constraint, 60)
-					worker.updateVariables()
+					worker.updateVariables(() => console.log("done"))
 				})
 			})
 		}

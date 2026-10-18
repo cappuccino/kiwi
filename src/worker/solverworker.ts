@@ -12,8 +12,10 @@ export class SolverWorker extends Solver {
   private _output: Int32Array
   private _timeSeq: Int32Array
   private _timeVal: Float64Array
+  private _flags: Int32Array
   private _needsUpdateVariables: boolean = false
   private _lastUpdate: number = -Infinity
+  private _notifyUpdateVariables: number = 0
 
   constructor(output: Int32Array, input: CommandConsumer, timeBuffer: SharedArrayBuffer) {
     super()
@@ -40,6 +42,11 @@ export class SolverWorker extends Solver {
         this.insertValueAt(0, variable._sharedOutputIndex, variable._notify)
       }
     }
+
+    //if (this._notifyUpdateVariables) {
+        Atomics.store(this._flags, 0, 1)
+        Atomics.notify(this._flags, 0, 1)
+    //}
   }
 
   /**
@@ -142,6 +149,7 @@ export class SolverWorker extends Solver {
   		}
   		case SolverCommand.UPDATE_VARIABLES:
         this._needsUpdateVariables = true // exécuté par run(), au plus une fois par refreshRate
+        //this._notifyUpdateVariables = payload.at(0) as number
   			break
   		case SolverCommand.ADD_EDIT_VARIABLE: {
   			const id = payload.at(0) as number

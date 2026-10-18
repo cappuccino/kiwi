@@ -77,9 +77,10 @@ export class SolverWorker extends Solver {
 
   private insertValueAt(value: number, index: number, notify: number = 0) : void {
 
-    Atomics.store(this._output, index, Math.round(value))
+    const new_value = Math.round(value)
+    const old_value = Atomics.exchange(this._output, index, new_value)
 
-    if (notify == 1) {
+    if (notify == 1 && old_value !== new_value) {
       Atomics.notify(this._output, index, 1)
     }
   }

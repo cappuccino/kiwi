@@ -186,7 +186,7 @@ function watchValue(typedArray: Int32Array, index: number, callback: Callback) {
           const prev = currentVal
 					currentVal = Atomics.load(typedArray, index)
 					//console.log(`${status}: La valeur a changé pour : ${currentVal}`)
-          callback(currentVal, prev)
+					callback(currentVal, prev)
 				}
 
 				// Relancer l'attente pour le prochain changement

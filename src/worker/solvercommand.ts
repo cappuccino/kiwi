@@ -10,3 +10,11 @@ export enum SolverCommand {
   SUGGEST_VALUE,
   TIME
 }
+
+/** Bit ajouté au type d'une commande envoyée avec un callback : le dernier mot du payload est l'id à acquitter. */
+export const ACK_FLAG = 0x100
+
+/** Mots d'acquittement partagés (voir AckChannel). */
+export const ACK_DONE = 0 // commande traitée par le solveur
+export const ACK_UPDATED = 1 // updateVariables() exécuté : les valeurs sont publiées
+export const ACK_WORDS = 2

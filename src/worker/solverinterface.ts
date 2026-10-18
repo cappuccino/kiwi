@@ -3,7 +3,8 @@ import { Constraint, Operator } from '../constraint.js'
 import { SymbolicWeight } from '../symbolicweight.js'
 import { Callback, Variable } from '../variable.js'
 
-import { SolverCommand } from './solvercommand.js'
+import { SolverCommand, ACK_FLAG, ACK_DONE, ACK_UPDATED, ACK_WORDS } from './solvercommand.js'
+import { AckChannel } from './ackchannel.js'
 import MyWorker from 'web-worker:./worker'
 import { CommandProducer, createCommandBuffer } from './commandqueue.js'
 
@@ -17,7 +18,8 @@ export class SolverInterface {
 	private _lastCommand: number | undefined = undefined
 	private _timeSeq: Int32Array
 	private _timeVal: Float64Array
-	private _flags: Int32Array
+	private _done: AckChannel // callbacks des commandes traitées
+	private _updated: AckChannel // callbacks de updateVariables()
 
 	constructor(options? : any) {
 		this._worker = new MyWorker()
@@ -28,10 +30,13 @@ export class SolverInterface {
     const inputBuffer = createCommandBuffer(COMMAND_DATA_LENGTH) // 65 536 words by default
 		this._commands = new CommandProducer(inputBuffer)
 
-		const sharedBuffer = new SharedArrayBuffer(20)
+		const sharedBuffer = new SharedArrayBuffer(16 + ACK_WORDS * Int32Array.BYTES_PER_ELEMENT)
 		this._timeSeq = new Int32Array(sharedBuffer, 0, 2)
 		this._timeVal = new Float64Array(sharedBuffer, 8, 1)
-		this._flags = new Int32Array(sharedBuffer, 16, 1)
+		const acks = new Int32Array(sharedBuffer, 16, ACK_WORDS)
+		this._done = new AckChannel(acks, ACK_DONE)
+		// Le worker acquitte les commandes avant updateVariables : on livre d'abord leurs callbacks.
+		this._updated = new AckChannel(acks, ACK_UPDATED, () => this._done.poll())
 
 		this._worker.postMessage({
 			type: SolverCommand.INIT,
@@ -44,8 +49,33 @@ export class SolverInterface {
 		}
 	}
 
-  public sendCommand(type: number, payload: ArrayLike<number> = []): void {
-		this._commands.send(type, payload)
+  /**
+	 * Agrandit le tampon de sortie partagé pour que `index` soit valide, que la variable ait un callback ou non.
+	 * Sans cela, une variable au-delà de la capacité initiale (128 mots) fait lever une RangeError au worker.
+	 */
+	private ensureOutputCapacity(index: number): void {
+		const buffer = this._sharedOuputArray.buffer as SharedArrayBuffer
+		const needed = (index + 1) * Int32Array.BYTES_PER_ELEMENT
+		if (needed > buffer.byteLength) {
+			buffer.grow(Math.min(buffer.maxByteLength, Math.max(needed, buffer.byteLength * 2)))
+		}
+	}
+
+  /**
+	 * Envoie une commande. Avec `callback`, le worker l'acquitte une fois traitée (voir AckChannel) et le callback
+	 * est appelé sur le main thread ; sans callback, aucune allocation supplémentaire.
+	 */
+  public sendCommand(
+		type: number,
+		payload: ArrayLike<number> = [],
+		callback?: () => void,
+		channel: AckChannel = this._done,
+	): void {
+		if (callback === undefined) {
+			this._commands.send(type, payload)
+		} else {
+			channel.register(callback, id => this._commands.send(type | ACK_FLAG, [...Array.from(payload), id]))
+		}
 		this._lastCommand = type
 	}
 
@@ -70,21 +100,23 @@ export class SolverInterface {
     operator: Operator,
     rhs: Expression | Variable | number,
     strength: SymbolicWeight = SymbolicWeight.create(0, 1),
+    callback?: () => void,
   ): Constraint {
     let cn = new Constraint(lhs, operator, rhs, strength)
-    this.addConstraint(cn)
+    this.addConstraint(cn, callback)
     return cn
   }
 
-	public addConstraint(constraint: Constraint): void {
-		this.addConstraints([constraint])
+	public addConstraint(constraint: Constraint, callback?: () => void): void {
+		this.addConstraints([constraint], callback)
 	}
 
-	public addConstraints(constraints: Constraint[]): void {
+	public addConstraints(constraints: Constraint[], callback?: () => void): void {
 
 		const payload = constraints.reduce((data:number[], constraint: Constraint) => {
 			const constraint_data = constraint.toBinary((variable: Variable) => {
 				if (variable._sharedOutputIndex === -1) {
+					this.ensureOutputCapacity(this._sharedOutputIndex)
 					if (variable._callback !== undefined) {
 						variable._notify = 1
 						watchValue(this._sharedOuputArray, this._sharedOutputIndex, variable._callback)
@@ -97,54 +129,58 @@ export class SolverInterface {
 			return [...data, ...constraint_data]
 		}, [constraints.length])
 
-		this.sendCommand(SolverCommand.ADD_CONSTRAINTS, payload)
+		this.sendCommand(SolverCommand.ADD_CONSTRAINTS, payload, callback)
 	}
 
-	public removeConstraint(constraint: Constraint): void {
-		this.removeConstraints([constraint])
+	public removeConstraint(constraint: Constraint, callback?: () => void): void {
+		this.removeConstraints([constraint], callback)
 	}
 
-	public removeConstraints(constraints: Constraint[]): void {
+	public removeConstraints(constraints: Constraint[], callback?: () => void): void {
 		const payload = constraints.map(cst => cst.id())
-		this.sendCommand(SolverCommand.REMOVE_CONSTRAINTS, payload)
+		this.sendCommand(SolverCommand.REMOVE_CONSTRAINTS, payload, callback)
 	}
 
-	public updateConstantTo(constraint: Constraint, constant: number): void {
+	public updateConstantTo(constraint: Constraint, constant: number, callback?: () => void): void {
 		const id = constraint.id()
-		this.sendCommand2(SolverCommand.UPDATE_CONSTANT, id, constant)
+		if (callback === undefined) this.sendCommand2(SolverCommand.UPDATE_CONSTANT, id, constant)
+		else this.sendCommand(SolverCommand.UPDATE_CONSTANT, [id, constant], callback)
 	}
 
-	public updateStrengthTo(constraint: Constraint, strength: SymbolicWeight): void {
+	public updateStrengthTo(constraint: Constraint, strength: SymbolicWeight, callback?: () => void): void {
 		const id = constraint.id()
 		const strength_ = strength.toBinary()
 		const payload = [id, ...strength_]
-		this.sendCommand(SolverCommand.UPDATE_STRENGTH, payload)
+		this.sendCommand(SolverCommand.UPDATE_STRENGTH, payload, callback)
 	}
 
-	public addEditVariable(variable: Variable, strength: SymbolicWeight): void {
+	public addEditVariable(variable: Variable, strength: SymbolicWeight, callback?: () => void): void {
 		const id = variable.id()
 		const strength_ = strength.toBinary()
 		const payload = [id, ...strength_]
-		this.sendCommand(SolverCommand.ADD_EDIT_VARIABLE, payload)
+		this.sendCommand(SolverCommand.ADD_EDIT_VARIABLE, payload, callback)
 	}
 
-	public removeEditVariable(variable: Variable): void {
+	public removeEditVariable(variable: Variable, callback?: () => void): void {
 		const id = variable.id()
-		this.sendCommand(SolverCommand.REMOVE_EDIT_VARIABLE, [id])
+		this.sendCommand(SolverCommand.REMOVE_EDIT_VARIABLE, [id], callback)
 	}
 
-	public suggestValue(variable: Variable, value: number): void {
+	public suggestValue(variable: Variable, value: number, callback?: () => void): void {
 		const id = variable.id()
-		this.sendCommand2(SolverCommand.SUGGEST_VALUE, id, value)
+		if (callback === undefined) this.sendCommand2(SolverCommand.SUGGEST_VALUE, id, value)
+		else this.sendCommand(SolverCommand.SUGGEST_VALUE, [id, value], callback)
 	}
 
-	public updateVariables(callback: (() => void) | undefined): void {
-		if (this._lastCommand !== SolverCommand.UPDATE_VARIABLES) {
-			if (callback !== undefined) {
-				this.watchValueOnce(SolverCommand.UPDATE_VARIABLES, this._flags, 0, callback)
-			} else {
-				this.sendCommand(SolverCommand.UPDATE_VARIABLES)
-			}
+	/**
+	 * Demande la mise à jour des variables. Avec `callback`, il est appelé une fois la mise à jour effectuée par le
+	 * worker : les valeurs sont alors disponibles via valueOfVariable().
+	 */
+	public updateVariables(callback?: () => void): void {
+		if (callback !== undefined) {
+			this.sendCommand(SolverCommand.UPDATE_VARIABLES, [], callback, this._updated)
+		} else if (this._lastCommand !== SolverCommand.UPDATE_VARIABLES) {
+			this.sendCommand(SolverCommand.UPDATE_VARIABLES)
 		}
 	}
 
@@ -167,15 +203,6 @@ export class SolverInterface {
 		this.sendCommand(SolverCommand.TIME)
 		const r = Atomics.waitAsync(this._timeSeq, 0, seq)
 		const done = () => callback(this._timeVal[0])
-		if (r.async) r.value.then(done)
-		else done() // le worker a déjà répondu : "not-equal", valeur déjà prête
-	}
-
-	public watchValueOnce(command: number, typedArray: Int32Array, index: number, callback: () => void) {
-		const value = Atomics.load(typedArray, index) // lu AVANT l'envoi de la commande
-		this.sendCommand(command)
-		const r = Atomics.waitAsync(typedArray, index, value)
-		const done = () => {callback(); typedArray[index] = 0}
 		if (r.async) r.value.then(done)
 		else done() // le worker a déjà répondu : "not-equal", valeur déjà prête
 	}

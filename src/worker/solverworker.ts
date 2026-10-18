@@ -4,7 +4,7 @@ import { SymbolicWeight, LEVEL_COUNT } from '../symbolicweight.js'
 import { IMap, Pair } from '../maptype.js'
 import { Variable } from '../variable.js'
 
-import { SolverCommand } from './solvercommand.js'
+import { SolverCommand, ACK_FLAG, ACK_DONE, ACK_UPDATED, ACK_WORDS } from './solvercommand.js'
 import { CommandConsumer, NO_COMMAND } from './commandqueue.js'
 
 export class SolverWorker extends Solver {
@@ -12,10 +12,10 @@ export class SolverWorker extends Solver {
   private _output: Int32Array
   private _timeSeq: Int32Array
   private _timeVal: Float64Array
-  private _flags: Int32Array
+  private _acks: Int32Array
   private _needsUpdateVariables: boolean = false
   private _lastUpdate: number = -Infinity
-  private _notifyUpdateVariables: number = 0
+  private _updateAckId: number = 0 // id du dernier updateVariables(callback) en attente de la prochaine mise à jour
 
   constructor(output: Int32Array, input: CommandConsumer, sharedBuffer: SharedArrayBuffer) {
     super()
@@ -23,7 +23,7 @@ export class SolverWorker extends Solver {
     this._output = output
     this._timeSeq = new Int32Array(sharedBuffer, 0, 2)
     this._timeVal = new Float64Array(sharedBuffer, 8, 1)
-    this._flags = new Int32Array(sharedBuffer, 16, 1)
+    this._acks = new Int32Array(sharedBuffer, 16, ACK_WORDS)
   }
 
   /**
@@ -44,10 +44,16 @@ export class SolverWorker extends Solver {
       }
     }
 
-    //if (this._notifyUpdateVariables) {
-        Atomics.store(this._flags, 0, 1)
-        Atomics.notify(this._flags, 0, 1)
-    //}
+    // Les valeurs sont publiées : on acquitte les updateVariables(callback) en attente (un id vaut pour les précédents).
+    if (this._updateAckId !== 0) {
+      this.ack(ACK_UPDATED, this._updateAckId)
+      this._updateAckId = 0
+    }
+  }
+
+  private ack(index: number, id: number): void {
+    Atomics.store(this._acks, index, id)
+    Atomics.notify(this._acks, index)
   }
 
   /**
@@ -143,16 +149,25 @@ export class SolverWorker extends Solver {
     this.updateVariables()
   }
 
-  private handleCommand(type: number) : void {
+  private handleCommand(rawType: number) : void {
     const payload = this._commands.payload
+    let size = this._commands.size
+    let type = rawType
+    let ackId = 0
+
+    // Commande envoyée avec un callback : le dernier mot du payload est l'id à acquitter.
+    if (type & ACK_FLAG) {
+      type &= ~ACK_FLAG
+      ackId = payload[--size]
+    }
 
   	switch (type) {
   		case SolverCommand.ADD_CONSTRAINTS: {
-        this.addConstraintsFromBinary(payload, this._commands.size)
+        this.addConstraintsFromBinary(payload, size)
   		}
   			break
   		case SolverCommand.REMOVE_CONSTRAINTS: {
-  			this.removeConstraintsFromBinary(payload, this._commands.size)
+  			this.removeConstraintsFromBinary(payload, size)
   		}
   			break
   		case SolverCommand.UPDATE_CONSTANT: {
@@ -196,6 +211,14 @@ export class SolverWorker extends Solver {
   		default:
   			break
   	}
+
+    if (ackId !== 0) {
+      if (type === SolverCommand.UPDATE_VARIABLES) {
+        this._updateAckId = ackId // acquitté par updateVariables(), une fois les valeurs publiées
+      } else {
+        this.ack(ACK_DONE, ackId)
+      }
+    }
   }
 
   private addConstraintsFromBinary(data: Int32Array, size: number): void {

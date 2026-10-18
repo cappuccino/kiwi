@@ -662,6 +662,73 @@ describe('import kiwi', function () {
 					worker.updateConstantTo(constraint, 60)
 					worker.updateVariables(() => console.log("done"))
 				})
+
+				it('callbacks: addConstraints, updateConstantTo, updateStrengthTo then updateVariables, in order', function (done) {
+					const worker = kiwi.Solver.create({worker: true, refreshRate: 0})
+					const x = new kiwi.Variable('x')
+					const constraint = new kiwi.Constraint(x, kiwi.Operator.Eq, 100, kiwi.Strength.medium)
+					const events = []
+
+					worker.addConstraints([constraint], () => events.push('added'))
+					worker.updateConstantTo(constraint, 50, () => events.push('constant'))
+					worker.updateStrengthTo(constraint, kiwi.Strength.strong, () => events.push('strength'))
+					worker.updateVariables(() => {
+						try {
+							events.push('updated')
+							assert.deepEqual(events, ['added', 'constant', 'strength', 'updated'])
+							assert.equal(worker.valueOfVariable(x), 50)
+							done()
+						} catch (error) {
+							done(error)
+						}
+					})
+				})
+
+				it('callbacks: removeConstraints', function (done) {
+					const worker = kiwi.Solver.create({worker: true, refreshRate: 0})
+					const x = new kiwi.Variable('x')
+					const constraint = new kiwi.Constraint(x, kiwi.Operator.Eq, 100, kiwi.Strength.medium)
+
+					worker.addConstraints([constraint])
+					worker.removeConstraints([constraint], () => {
+						worker.updateVariables(() => {
+							try {
+								assert.equal(worker.valueOfVariable(x), 0)
+								done()
+							} catch (error) {
+								done(error)
+							}
+						})
+					})
+				})
+
+				it('callbacks: several pending updateVariables callbacks are all called (throttled worker)', function (done) {
+					const worker = kiwi.Solver.create({worker: true}) // 60 Hz : les mises à jour sont fusionnées
+					const x = new kiwi.Variable('x')
+					let called = 0
+
+					worker.addConstraints([new kiwi.Constraint(x, kiwi.Operator.Eq, 10, kiwi.Strength.medium)])
+					for (let i = 0; i < 3; i++) {
+						worker.updateVariables(() => {
+							if (++called === 3) done()
+						})
+					}
+				})
+
+				it('more than 128 variables, none with a callback', function (done) {
+					const worker = kiwi.Solver.create({worker: true, refreshRate: 0})
+					const variables = Array.from({length: 300}, () => new kiwi.Variable())
+
+					worker.addConstraints(variables.map((v, i) => new kiwi.Constraint(v, kiwi.Operator.Eq, i, kiwi.Strength.medium)))
+					worker.updateVariables(() => {
+						try {
+							variables.forEach((v, i) => assert.equal(worker.valueOfVariable(v), i))
+							done()
+						} catch (error) {
+							done(error)
+						}
+					})
+				})
 			})
 		}
 	})

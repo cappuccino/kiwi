@@ -93,7 +93,7 @@ export class SolverInterface {
 			})
 
 			return [...data, ...constraint_data]
-		}, [])
+		}, [constraints.length])
 
 		this.sendCommand(SolverCommand.ADD_CONSTRAINTS, payload)
 	}

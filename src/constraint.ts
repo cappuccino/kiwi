@@ -1,8 +1,7 @@
 import {Expression} from './expression.js'
 import {Strength} from './strength.js'
-import {SymbolicWeight} from './symbolicweight.js'
+import {SymbolicWeight, LEVEL_COUNT} from './symbolicweight.js'
 import {Variable} from './variable.js'
-import { LEVEL_COUNT } from './symbolicweight.js'
 /**
  * An enum defining the linear constraint operators.
  *

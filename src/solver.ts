@@ -976,6 +976,13 @@ export class Solver {
 		return new Symbol(type, this._idTick++)
 	}
 
+  public toString() : String {
+    const constraints = this.getConstraints();
+    const description = constraints.map(cst => cst.toString()).join("\n")
+
+    return `${this.constructor.name}: ${constraints.length} constraints, ${this._varMap.array.length} variables\n${description}`
+  }
+
 	private _cnMap = createCnMap()
   protected _rowMap = createRowMap()
   protected _varMap = createVarMap()

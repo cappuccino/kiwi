@@ -209,6 +209,8 @@ export class SolverWorker extends Solver {
         Atomics.add(this._timeSeq, 0, 1)
         Atomics.notify(this._timeSeq, 0)
         break
+      case SolverCommand.PRINT:
+        console.log(this.toString())
   		default:
   			break
   	}

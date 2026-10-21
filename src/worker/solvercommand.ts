@@ -8,7 +8,8 @@ export enum SolverCommand {
   ADD_EDIT_VARIABLE,
   REMOVE_EDIT_VARIABLE,
   SUGGEST_VALUE,
-  TIME
+  TIME,
+  PRINT,
 }
 
 /** Bit ajouté au type d'une commande envoyée avec un callback : le dernier mot du payload est l'id à acquitter. */

@@ -217,6 +217,15 @@ export class SolverInterface {
 		return []
 	}
 
+	public hasConstraints(constraint: Constraint) : boolean {
+		console.warn("Solver hasConstraints() is not implemented in worker mode")
+		return false
+	}
+
+	public print() {
+		this.sendCommand(SolverCommand.PRINT)
+	}
+
 	public time(callback: (date: number) => void) {
 		const seq = Atomics.load(this._timeSeq, 0)
 		this.sendCommand(SolverCommand.TIME)
@@ -225,6 +234,10 @@ export class SolverInterface {
 		if (r.async) r.value.then(done)
 		else done()
 	}
+
+	public isAsync() : boolean {
+    return true
+  }
 }
 
 function watchValue(typedArray: Int32Array, index: number, coefficient: number, callback: Callback) {

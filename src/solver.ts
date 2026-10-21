@@ -990,6 +990,10 @@ export class Solver {
     return `${this.constructor.name}: ${constraints.length} constraints, ${this._varMap.array.length} variables\n${description}`
   }
 
+  public isAsync() : boolean {
+    return false
+  }
+
 	private _cnMap = createCnMap()
   protected _rowMap = createRowMap()
   protected _varMap = createVarMap()

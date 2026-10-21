@@ -637,7 +637,6 @@ describe('import kiwi', function () {
 				var decoded2 = kiwi.Expression.fromBinary(encoded2)
 
 				assert.equal(exp2.toString(), decoded2.toString())
-
 			})
 
 			it('constraint', function () {
@@ -712,7 +711,7 @@ describe('import kiwi', function () {
 				})
 
 				it('addConstraints => updateConstraint', async function (done) {
-					const worker = kiwi.Solver.create({worker: true, refreshRate:0})
+					const worker = kiwi.Solver.create({worker: true, refreshRate:60})
 
 					const x = new kiwi.Variable("x")
 					const expected = [100, 50, 60]
@@ -727,21 +726,54 @@ describe('import kiwi', function () {
 							if (equals) {
 								done()
 							} else {
-								done(new Error(`expected values == ${expected}, was ${result}`))
+								done(new Error(`expected values == ${expected.toString()}, was ${result.toString()}`))
 							}
 						}
 					})
 
-					const constraint = new kiwi.Constraint(x, kiwi.Operator.Eq, 100, kiwi.Strength.medium)
+					const constraint = new kiwi.Constraint(x, kiwi.Operator.Eq, expected.at(0), kiwi.Strength.medium)
 					worker.addConstraints([constraint])
 					worker.updateVariables()
 					await wait(100)
 
-					worker.updateConstantTo(constraint, 50)
+					worker.updateConstantTo(constraint, expected.at(1))
 					worker.updateVariables()
 					await wait(100)
 
-					worker.updateConstantTo(constraint, 60)
+					worker.updateConstantTo(constraint, expected.at(2))
+					worker.updateVariables(() => console.log("done"))
+				})
+
+				it('addConstraints => updateConstraint with floatPrecision==2', async function (done) {
+					const worker = kiwi.Solver.create({worker: true, refreshRate:60, floatPrecision:2})
+
+					const x = new kiwi.Variable("x")
+					const expected = [100, 50.5, 60.5]
+					let result = []
+
+					x.subscribe((value, prev) => {
+						result.push(value)
+						if (result.length == expected.length) {
+							const equals = result.every(i => expected.includes(i))
+
+							if (equals) {
+								done()
+							} else {
+								done(new Error(`expected values == ${expected.toString()}, was ${result.toString()}`))
+							}
+						}
+					})
+
+					const constraint = new kiwi.Constraint(x, kiwi.Operator.Eq, expected.at(0), kiwi.Strength.medium)
+					worker.addConstraints([constraint])
+					worker.updateVariables()
+					await wait(100)
+
+					worker.updateConstantTo(constraint, expected.at(1))
+					worker.updateVariables()
+					await wait(100)
+
+					worker.updateConstantTo(constraint, expected.at(2))
 					worker.updateVariables(() => console.log("done"))
 				})
 

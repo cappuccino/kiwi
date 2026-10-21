@@ -2,6 +2,7 @@ import { Expression } from '../expression.js'
 import { Constraint, Operator } from '../constraint.js'
 import { SymbolicWeight } from '../symbolicweight.js'
 import { Callback, Variable } from '../variable.js'
+import { SolverOptions } from '../solver.js'
 
 import { SolverCommand, ACK_FLAG, ACK_DONE, ACK_UPDATED, ACK_WORDS } from './solvercommand.js'
 import { AckChannel } from './ackchannel.js'
@@ -20,8 +21,11 @@ export class SolverInterface {
 	private _timeVal: Float64Array
 	private _done: AckChannel // callbacks des commandes traitées
 	private _updated: AckChannel // callbacks de updateVariables()
+	private _coefficient: number
 
-	constructor(options? : any) {
+	constructor(options? : SolverOptions) {
+		Variable.debug = options?.debug??false
+
 		this._worker = new MyWorker()
 
 		const sharedOutputBuffer = new SharedArrayBuffer(512, { maxByteLength: Math.pow(2, 20) })
@@ -45,7 +49,15 @@ export class SolverInterface {
 		})
 
 		this._worker.onmessage = (event: any) => {
-			console.log(`%c ${event.data}`, 'font-family:monospace;font-size:18px;color:red;font-weight:bold')
+			const {type, data} = event.data
+			switch(type) {
+				case SolverCommand.INIT: {
+					console.log(`%c Solver worker initialized`, 'font-family:monospace;font-size:14px;color:red;font-weight:bold')
+				}
+					break
+				default:
+					break
+			}
 		}
 	}
 

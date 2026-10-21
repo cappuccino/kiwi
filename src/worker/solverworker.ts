@@ -1,4 +1,4 @@
-import { Solver, Symbol, SymbolType } from '../solver.js'
+import { Solver, Symbol, SymbolType, SolverOptions } from '../solver.js'
 import { Constraint } from '../constraint.js'
 import { SymbolicWeight, LEVEL_COUNT } from '../symbolicweight.js'
 import { IMap, Pair } from '../maptype.js'
@@ -17,8 +17,8 @@ export class SolverWorker extends Solver {
   private _lastUpdate: number = -Infinity
   private _updateAckId: number = 0 // id du dernier updateVariables(callback) en attente de la prochaine mise à jour
 
-  constructor(output: Int32Array, input: CommandConsumer, sharedBuffer: SharedArrayBuffer) {
-    super()
+  constructor(output: Int32Array, input: CommandConsumer, sharedBuffer: SharedArrayBuffer, options?: SolverOptions) {
+    super(options)
     this._commands = input
     this._output = output
     this._timeSeq = new Int32Array(sharedBuffer, 0, 2)

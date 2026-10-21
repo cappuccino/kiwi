@@ -14,7 +14,7 @@ ctx.onmessage = (e: MessageEvent<any>) => {
   const updatesMs = (refreshRate === 0) ? 0 : (1000 / refreshRate)
   //ctx.postMessage("Kiwi Solver running in web worker !!")
 
-  new SolverWorker(data.output, new CommandConsumer(data.input), data.shared).run(updatesMs)
+  new SolverWorker(data.output, new CommandConsumer(data.input), data.shared, options).run(updatesMs)
 }
 
 export default ctx

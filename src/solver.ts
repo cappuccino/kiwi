@@ -14,7 +14,8 @@ import type { SolverInterface } from './worker/solverinterface.js'
  export interface SolverOptions {
   worker?: boolean,
   floatPrecision?: number,
-  refreshRate?: number
+  refreshRate?: number,
+  debug?: boolean
 }
 
 export class Solver {
@@ -36,14 +37,20 @@ export class Solver {
       if (!globalThis.crossOriginIsolated) {
         throw new Error('Option worker=true. The client is not crossOriginIsolated.\nYou may need to add the following headers to your server:\nCross-Origin-Opener-Policy=same-origin\nCross-Origin-Embedder-Policy=require-corp')
       }
+
       if (!Solver.workerFactory) {
         throw new Error('Option worker=true. Worker support is not registered: import Solver from the package entry point.')
       }
+
       return Solver.workerFactory(options)
     } else {
-      return new Solver()
+      return new Solver(options)
     }
 	}
+
+  constructor(options?: SolverOptions) {
+    Variable.debug = options?.debug??false
+  }
 
 	/**
 	 * Creates and add a constraint to the solver.

@@ -1,7 +1,7 @@
 import { Expression } from '../expression.js'
 import { Constraint, Operator } from '../constraint.js'
 import { SymbolicWeight } from '../symbolicweight.js'
-import { Callback, Variable } from '../variable.js'
+import { Callback, Variable, floatToInt32 } from '../variable.js'
 import { SolverOptions } from '../solver.js'
 
 import { SolverCommand, ACK_FLAG, ACK_DONE, ACK_UPDATED, ACK_WORDS } from './solvercommand.js'
@@ -41,6 +41,7 @@ export class SolverInterface {
 		this._done = new AckChannel(acks, ACK_DONE)
 		// Le worker acquitte les commandes avant updateVariables : on livre d'abord leurs callbacks.
 		this._updated = new AckChannel(acks, ACK_UPDATED, () => this._done.poll())
+		this._coefficient = Math.pow(10, options?.floatPrecision??0)
 
 		this._worker.postMessage({
 			type: SolverCommand.INIT,
@@ -131,7 +132,7 @@ export class SolverInterface {
 					this.ensureOutputCapacity(this._sharedOutputIndex)
 					if (variable._callback !== undefined) {
 						variable._notify = 1
-						watchValue(this._sharedOuputArray, this._sharedOutputIndex, variable._callback)
+						watchValue(this._sharedOuputArray, this._sharedOutputIndex, this._coefficient, variable._callback)
 					}
 
 					variable._sharedOutputIndex = this._sharedOutputIndex++
@@ -154,15 +155,19 @@ export class SolverInterface {
 	}
 
 	public updateConstantTo(constraint: Constraint, constant: number, callback?: () => void): void {
-		const id = constraint.id()
-		if (callback === undefined) this.sendCommand2(SolverCommand.UPDATE_CONSTANT, id, constant)
-		else this.sendCommand(SolverCommand.UPDATE_CONSTANT, [id, constant], callback)
+		const payload = new Int32Array(3)
+		payload[0] = constraint.id()
+		payload.set(floatToInt32(constant), 1)
+
+		this.sendCommand(SolverCommand.UPDATE_CONSTANT, payload, callback)
 	}
 
 	public updateStrengthTo(constraint: Constraint, strength: SymbolicWeight, callback?: () => void): void {
-		const id = constraint.id()
-		const strength_ = strength.toBinary()
-		const payload = [id, ...strength_]
+		const strength_data = strength.toBinary()
+		const payload = new Int32Array(1 + strength_data.length)
+		payload[0] = constraint.id()
+		payload.set(strength_data, 1)
+
 		this.sendCommand(SolverCommand.UPDATE_STRENGTH, payload, callback)
 	}
 
@@ -179,9 +184,11 @@ export class SolverInterface {
 	}
 
 	public suggestValue(variable: Variable, value: number, callback?: () => void): void {
-		const id = variable.id()
-		if (callback === undefined) this.sendCommand2(SolverCommand.SUGGEST_VALUE, id, value)
-		else this.sendCommand(SolverCommand.SUGGEST_VALUE, [id, value], callback)
+		const payload = new Int32Array(3)
+		payload[0] = variable.id()
+		payload.set(floatToInt32(value), 1)
+
+		this.sendCommand(SolverCommand.SUGGEST_VALUE, payload, callback)
 	}
 
 	/**
@@ -202,7 +209,7 @@ export class SolverInterface {
 			throw new Error(`Invalid Atomics access index ${index} out of bounds [0-${this._sharedOuputArray.length}]`)
 		}
 
-		return Atomics.load(this._sharedOuputArray, index)
+		return Atomics.load(this._sharedOuputArray, index) / this._coefficient
 	}
 
 	public getConstraints() : Constraint[] {
@@ -211,16 +218,16 @@ export class SolverInterface {
 	}
 
 	public time(callback: (date: number) => void) {
-		const seq = Atomics.load(this._timeSeq, 0) // lu AVANT l'envoi de la commande
+		const seq = Atomics.load(this._timeSeq, 0)
 		this.sendCommand(SolverCommand.TIME)
 		const r = Atomics.waitAsync(this._timeSeq, 0, seq)
 		const done = () => callback(this._timeVal[0])
 		if (r.async) r.value.then(done)
-		else done() // le worker a déjà répondu : "not-equal", valeur déjà prête
+		else done()
 	}
 }
 
-function watchValue(typedArray: Int32Array, index: number, callback: Callback) {
+function watchValue(typedArray: Int32Array, index: number, coefficient: number, callback: Callback) {
 
 	if (index >= typedArray.length) {
 		let buffer = typedArray.buffer as SharedArrayBuffer
@@ -237,10 +244,10 @@ function watchValue(typedArray: Int32Array, index: number, callback: Callback) {
 			result.value.then((status) => {
 				// La valeur a changé ou une notification a eu lieu
 				if (status == 'ok') {
-          const prev = currentVal
+					const previousVal = currentVal
 					currentVal = Atomics.load(typedArray, index)
 					//console.log(`${status}: La valeur a changé pour : ${currentVal}`)
-					callback(currentVal, prev)
+					callback(currentVal / coefficient, previousVal / coefficient)
 				}
 
 				// Relancer l'attente pour le prochain changement
@@ -248,9 +255,9 @@ function watchValue(typedArray: Int32Array, index: number, callback: Callback) {
 			})
 		} else {
 			// La valeur était déjà différente au moment de l'appel
-      const prev = currentVal
+      const previousVal = currentVal
 			currentVal = Atomics.load(typedArray, index)
-      callback(currentVal, prev)
+      callback(currentVal / coefficient, previousVal / coefficient)
 			waitForChange()
 		}
 	}

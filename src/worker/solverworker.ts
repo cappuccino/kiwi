@@ -2,7 +2,7 @@ import { Solver, Symbol, SymbolType, SolverOptions } from '../solver.js'
 import { Constraint } from '../constraint.js'
 import { SymbolicWeight, LEVEL_COUNT } from '../symbolicweight.js'
 import { IMap, Pair } from '../maptype.js'
-import { Variable } from '../variable.js'
+import { Variable, int32ToFloat } from '../variable.js'
 
 import { SolverCommand, ACK_FLAG, ACK_DONE, ACK_UPDATED, ACK_WORDS } from './solvercommand.js'
 import { CommandConsumer, NO_COMMAND } from './commandqueue.js'
@@ -16,6 +16,7 @@ export class SolverWorker extends Solver {
   private _needsUpdateVariables: boolean = false
   private _lastUpdate: number = -Infinity
   private _updateAckId: number = 0 // id du dernier updateVariables(callback) en attente de la prochaine mise à jour
+  private _coefficient: number
 
   constructor(output: Int32Array, input: CommandConsumer, sharedBuffer: SharedArrayBuffer, options?: SolverOptions) {
     super(options)
@@ -24,6 +25,7 @@ export class SolverWorker extends Solver {
     this._timeSeq = new Int32Array(sharedBuffer, 0, 2)
     this._timeVal = new Float64Array(sharedBuffer, 8, 1)
     this._acks = new Int32Array(sharedBuffer, 16, ACK_WORDS)
+    this._coefficient = Math.pow(10, options?.floatPrecision??0)
   }
 
   /**
@@ -81,7 +83,7 @@ export class SolverWorker extends Solver {
         buffer.grow(size * Int32Array.BYTES_PER_ELEMENT)
       }
 
-      this._output[key._sharedOutputIndex] = key.value()
+      this._output[key._sharedOutputIndex] = key.value() * this._coefficient
 
       return pair
     } else {
@@ -90,8 +92,7 @@ export class SolverWorker extends Solver {
   }
 
   private insertValueAt(value: number, index: number, notify: number = 0) : void {
-
-    const new_value = Math.round(value)
+    const new_value = Math.round(value * this._coefficient)
     const old_value = Atomics.exchange(this._output, index, new_value)
 
     if (notify == 1 && old_value !== new_value) {
@@ -170,9 +171,15 @@ export class SolverWorker extends Solver {
   			this.removeConstraintsFromBinary(payload, size)
   		}
   			break
+      case SolverCommand.SUGGEST_VALUE: {
+        const id = payload.at(0) as number
+        const constant = int32ToFloat(payload.subarray(1, 3))
+        this._suggestValue(id, constant) // ? value * this._coefficient
+  		}
+  			break
   		case SolverCommand.UPDATE_CONSTANT: {
   			const id = payload.at(0) as number
-  			const constant = payload.at(1) as number
+        const constant = int32ToFloat(payload.subarray(1, 3))
         super._updateConstantToById(id, constant)
   		}
   			break
@@ -195,12 +202,6 @@ export class SolverWorker extends Solver {
   		case SolverCommand.REMOVE_EDIT_VARIABLE: {
   			const id = payload.at(0) as number
         this._removeEditVariable(id)
-  		}
-  			break
-  		case SolverCommand.SUGGEST_VALUE: {
-  			const id = payload.at(0) as number
-  			const value = payload.at(1) as number
-        this._suggestValue(id, value)
   		}
   			break
       case SolverCommand.TIME:
